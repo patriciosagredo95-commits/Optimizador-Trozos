@@ -1,17 +1,13 @@
 import {DIAMETERS} from './optimizer.js';
 
 const MAX_LOGS_PER_DIAMETER=10000;
-const EPS=1e-10;
-
-// La vista y el pedido usan el mismo esquema de mayor rendimiento entre los
-// candidatos ya calculados. El desempate favorece el volumen objetivo.
+// Misma prioridad lexicográfica para la vista, la exportación y el pedido.
 export function bestYieldAlternative(result){
   const alternatives=result?.alternatives?.length?result.alternatives:result?.status==='found'?[result]:[];
   return alternatives.reduce((winner,pattern,index)=>{
-    if(pattern.status!=='found'||!Number.isFinite(pattern.volume)||!Number.isFinite(pattern.referenceVolume)||pattern.referenceVolume<=0)return winner;
-    const yieldPercent=100*pattern.volume/pattern.referenceVolume;
-    if(!winner||yieldPercent>winner.yieldPercent+EPS||
-      (Math.abs(yieldPercent-winner.yieldPercent)<=EPS&&(pattern.targetVolume??0)>(winner.pattern.targetVolume??0)+EPS)){
+    if(pattern.status!=='found'||!Number.isFinite(pattern.volume)||!(pattern.referenceVolume>0))return winner;
+    const principal=pattern.cutting.nPrin,yieldPercent=100*pattern.volume/pattern.referenceVolume;
+    if(!winner||principal>winner.pattern.cutting.nPrin||(principal===winner.pattern.cutting.nPrin&&yieldPercent>winner.yieldPercent+1e-7)){
       return {pattern,alternative:index+1,yieldPercent};
     }
     return winner;
@@ -27,9 +23,8 @@ function logCount(value,diameter){
 }
 
 // El stock fija el número de trozos. Cada diámetro se optimiza de forma independiente
-// usando el patrón de mayor rendimiento entre los candidatos ya calculados.
-export function simulateOrder(resultsByDiameter,stockByDiameter,config={}){
-  const targetBEnabled=config.targetBEnabled!==false;
+// usando principal sana y después rendimiento JAS.
+export function simulateOrder(resultsByDiameter,stockByDiameter){
   const rows=DIAMETERS.map(diameterCm=>{
     const availableLogs=logCount(stockByDiameter instanceof Map?stockByDiameter.get(diameterCm):stockByDiameter?.[diameterCm],diameterCm);
     const best=bestYieldAlternative(resultsByDiameter.get(diameterCm));
@@ -39,18 +34,19 @@ export function simulateOrder(resultsByDiameter,stockByDiameter,config={}){
     return {diameterCm,availableLogs,usedLogs,unusedLogs:availableLogs-usedLogs,
       alternative:usedLogs?best.alternative:null,
       piecesA:usedLogs*(pattern?.counts?.[0]?.quantity??0),
-      piecesB:targetBEnabled?usedLogs*(pattern?.counts?.[1]?.quantity??0):0,
+      piecesB:usedLogs*(pattern?.cutting.nApr??0),
+      piecesC:usedLogs*(pattern?.cutting.nApr2??0),
       recoveryPieces:usedLogs*(pattern?.recoveryCount??0),
       volumeM3,referenceVolumeM3,yieldPercent:usedLogs?100*volumeM3/referenceVolumeM3:null,
       status:availableLogs&&!best?'no_pattern':usedLogs?'used':'no_stock'};
   });
   const totals=rows.reduce((sum,row)=>({
     availableLogs:sum.availableLogs+row.availableLogs,usedLogs:sum.usedLogs+row.usedLogs,
-    piecesA:sum.piecesA+row.piecesA,piecesB:sum.piecesB+row.piecesB,
+    piecesA:sum.piecesA+row.piecesA,piecesB:sum.piecesB+row.piecesB,piecesC:sum.piecesC+row.piecesC,
     recoveryPieces:sum.recoveryPieces+row.recoveryPieces,
     volumeM3:sum.volumeM3+row.volumeM3,referenceVolumeM3:sum.referenceVolumeM3+row.referenceVolumeM3
-  }),{availableLogs:0,usedLogs:0,piecesA:0,piecesB:0,recoveryPieces:0,volumeM3:0,referenceVolumeM3:0});
+  }),{availableLogs:0,usedLogs:0,piecesA:0,piecesB:0,piecesC:0,recoveryPieces:0,volumeM3:0,referenceVolumeM3:0});
   totals.unusedLogs=totals.availableLogs-totals.usedLogs;
   totals.yieldPercent=totals.referenceVolumeM3?100*totals.volumeM3/totals.referenceVolumeM3:null;
-  return {targetBEnabled,rows,totals};
+  return {labels:{piecesA:'Principal',piecesB:'Aprovechamiento 1',piecesC:'Aprovechamiento 2'},rows,totals};
 }

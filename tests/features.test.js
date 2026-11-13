@@ -1,190 +1,192 @@
+import {formatPercent} from '../dist/format.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {DIAMETERS,createOptimizer,normalizeConfig,assertGeometry} from '../dist/optimizer.js';
-import {configurationFile,parseConfiguration,resultsCSV,printSheet,stageSVG,cutSequence,CUT_MACHINES,historicalComparison} from '../dist/reports.js';
-import {bestYieldAlternative} from '../dist/order.js';
-const input={targets:[{thickness:22,width:125},{thickness:22,width:110}],recoveries:[{thickness:22,width:75},{thickness:22,width:60}],criterion:'both',length:4000,kerfBand:3.4,kerfGang:4.2,kerfEdger:3.8,margin:0,maxBases:3};
+import vm from 'node:vm';
+import * as optimizer from '../dist/optimizer.js';
+import * as reports from '../dist/reports.js';
+import * as order from '../dist/order.js';
+import * as planner from '../dist/run-planner.js';
+import * as armado from '../dist/armado.js';
+import {createOptimizer,DIAMETERS,normalizeConfig,CUTTING_DEFAULTS} from '../dist/optimizer.js';
+import {configurationFile,parseConfiguration,restoreConfiguration,STORAGE_KEY,resultsCSV,printSheet,stageSVG,cutSequence,historicalComparison,activeProducts} from '../dist/reports.js';
 
-test('la interfaz ofrece dos alternativas seleccionables por diámetro',()=>{
+test('vista por etapas: pantalla y ficha comparten resúmenes, agrupación y armados',()=>{
+  const engine=createOptimizer(),result=engine.solve(42),sheet=printSheet(result,engine.config);
+  const app=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
+  assert.ok(app.includes("$('stage-explanation').textContent=stageSummary(r,state.stage)"));
+  assert.ok(app.includes('stageOutputsHTML(r,state.stage,c)'));
+  for(const stage of [0,1,2,3,4])assert.ok(sheet.includes(reports.stageSummary(result,stage)));
+  assert.equal((sheet.match(/class="stage-arm-chain"/g)??[]).length,2);
+  assert.equal((sheet.match(/data-arm-width=/g)??[]).length,11);
+  assert.ok(sheet.includes('Armado: 22 · 22 · 50 · 26 · 26 · 50 · 22 · 22 mm; cada corte 4,2 mm'));
+  const final=sheet.split('<section class="print-output">')[0];
+  assert.equal((final.match(/<li value=/g)??[]).length,6);
+  assert.ok(final.includes('encierra la médula'));
+  assert.ok(sheet.includes('No pasan por esta máquina'));
+});
+
+test('persistencia v3. Ida y vuelta, migración v2 y descarte de entradas del motor anterior',()=>{
+  const config=normalizeConfig({cutting:{m:4},length:6000});
+  assert.deepEqual(parseConfiguration(configurationFile(config)),config);
+  const old={targets:[{thickness:'bad'}],criterion:'total',recoveries:[],kerfBand:12,margin:15,maxBases:2,largeLog:{...CUTTING_DEFAULTS,m:4},length:6000};
+  assert.deepEqual(normalizeConfig(old),config);
+  assert.deepEqual(parseConfiguration(JSON.stringify({format:'corte-config',version:1,configuration:old})),config);
+  const storage=new Map([['glover-cutting-config-v2',JSON.stringify(old)]]);
+  const reader={getItem:key=>storage.get(key)??null};
+  assert.deepEqual(restoreConfiguration(reader),config);
+  storage.set(STORAGE_KEY,JSON.stringify(normalizeConfig()));
+  assert.deepEqual(restoreConfiguration(reader),normalizeConfig());
+  assert.deepEqual(restoreConfiguration({getItem:()=>null}),normalizeConfig());
+  assert.deepEqual(Object.keys(normalizeConfig(old)),['cutting','length']);
+  assert.throws(()=>parseConfiguration('{"format":"bad"}'));
+  assert.throws(()=>parseConfiguration('{"format":"corte-config","version":99}'));
+  assert.throws(()=>restoreConfiguration({getItem:()=>'{malformed'}));
+});
+test('formulario único. Campos V2 y ausencia de entradas o rótulos anteriores',()=>{
   const html=readFileSync(new URL('../dist/index.html',import.meta.url),'utf8');
   const app=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
-  assert.match(html,/id="alternative-grid"/);
-  assert.match(html,/id="alternative-count">0 \/ 2/);
-  assert.match(app,/alternativeSelections/);
-  assert.match(app,/Alternativa \$\{index\+1\}/);
+  assert.equal((html.match(/<form /g)||[]).length,1);
+  for(const id of ['large-x1','large-y1','large-x2','large-y2','large-x3','large-y3','large-med','large-a','large-c','large-m','large-n','large-e1','large-e2','large-cm','large-cw','reference-diameter','length','alternative-grid','historical-inputs','order-total-c'])assert.ok(html.includes(`id="${id}"`),id);
+  for(const removed of ['target-a-thickness','target-b-enabled','recovery-inputs','add-recovery','criterion','kerf-band','kerf-gang','kerf-edger','margin','max-bases','min-base-width','max-base-width']){
+    assert.ok(!html.includes(`id="${removed}"`),removed);
+    assert.ok(!app.includes(`$('${removed}')`),removed);
+  }
+  assert.ok(!/menores|mayores|hasta 34|desde 36|objetivo [AB]/i.test(html));
+  const ids=new Set([...html.matchAll(/id="([^"]+)"/g)].map(match=>match[1]));
+  for(const match of app.matchAll(/\$\('([^']+)'\)/g))assert.ok(ids.has(match[1]),match[1]);
 });
-
-test('inactive B is excluded from validation, duplicates and all 13 solutions; activation restores validation',()=>{
-  const c={...input,targetBEnabled:false,targets:[input.targets[0],{thickness:'',width:'invalid'}]};
-  const engine=createOptimizer(c);
-  for(const d of DIAMETERS){const r=engine.solve(d);assert.equal(r.counts[1].quantity,0);assert.ok(r.pieces.every(p=>p.productId!==1));}
-  assert.throws(()=>normalizeConfig({...c,targetBEnabled:true}));
-  assert.doesNotThrow(()=>normalizeConfig({...input,targetBEnabled:false,targets:[input.targets[0],input.recoveries[0]]}));
-  assert.throws(()=>normalizeConfig({...input,targets:[input.targets[0],input.recoveries[0]]}),/repetida/);
-});
-
-test('alternatives are distinct and geometrically valid; search is always detailed at 1 mm',()=>{
-  const engine=createOptimizer(input),detailed=engine.solve(32);
-  assert.equal(engine.config.searchMode,'detailed');
-  assert.equal(detailed.searchStepMm,1);
-  assert.equal(detailed.alternatives.length,2);
-  const signatures=detailed.alternatives.map(r=>r.counts.map(c=>c.quantity).join(',')+'|'+r.bases.map(b=>b.width).sort().join(','));
-  assert.equal(new Set(signatures).size,2);
-  detailed.alternatives.forEach(r=>assertGeometry(r,engine.config));
-  const legacyEngine=createOptimizer({...input,searchMode:'fast'}),legacy=legacyEngine.solve(32);
-  assert.equal(legacyEngine.config.searchMode,'detailed');
-  assert.equal(legacy.searchStepMm,1);
-  assert.equal(legacy.targetVolume,detailed.targetVolume);
-  assert.equal(legacy.volume,detailed.volume);
-});
-
-test('hidden legacy minima are cleared and every alternative respects basa width limits',()=>{
-  const engine=createOptimizer({...input,minA:300,minB:300,minBaseWidth:100,maxBaseWidth:125}),r=engine.solve(32);
-  assert.equal(engine.config.minA,0);assert.equal(engine.config.minB,0);
-  assert.ok(r.alternatives.length);
-  for(const a of r.alternatives)assert.ok(a.bases.every(b=>b.width>=100&&b.width<=125));
-  assert.throws(()=>normalizeConfig({...input,minBaseWidth:200,maxBaseWidth:100}));
-});
-
-test('configuration round trip, CSV quantities, printable stages and historical delta are consistent',()=>{
-  const engine=createOptimizer({...input,searchMode:'detailed',minA:2,minB:1,maxBaseWidth:125}),r=engine.solve(28),c=engine.config;
-  assert.deepEqual(parseConfiguration(configurationFile(c),normalizeConfig),c);
-  assert.throws(()=>parseConfiguration('{"format":"bad"}',normalizeConfig));
-  const csv=resultsCSV([r],c);assert.equal(csv.split('\r\n').length,2);assert.ok(csv.includes('Volumen objetivo'));assert.ok(!csv.includes('Alternativa'));
-  const best=bestYieldAlternative(r)?.pattern;assert.ok(best);assert.equal(csv,resultsCSV([{...best,alternatives:[best]}],c));
-  const sequence=cutSequence(r,c);assert.equal(sequence.carriage.cuts.length,1);assert.ok(sequence.bands.cuts.length);assert.equal(sequence.multiple.groups.length,r.bases.length);assert.ok(sequence.multiple.groups.every(group=>group.cuts.length));assert.ok(sequence.reference.includes('Posiciones'));
-  const sheet=printSheet(r,c);assert.equal((sheet.match(/<svg\b/g)||[]).length,5);assert.match(sheet,/esquema de mayor rendimiento/i);assert.ok(!/alternativa\s+\d/i.test(sheet));assert.ok(/Ruta|Secuencia operativa/.test(sheet));assert.ok(sheet.includes('Carro Huincha'));assert.ok(sheet.includes('Huinchas'));assert.ok(sheet.includes('Múltiple'));assert.ok(sheet.includes('Canteadora'));assert.ok(sheet.includes('Cotas de las basas'));assert.ok(sheet.includes('Cortes por máquina'));assert.ok(CUT_MACHINES.every(machine=>sheet.includes(`background:${machine.color}`)));assert.ok(!/NaN|undefined/.test(sheet));
-  assert.match(printSheet(r.alternatives[1],c,{schemeLabel:'Alternativa 2'}),/Alternativa 2/);
-  const history=historicalComparison(r,c,r.counts.map(p=>p.quantity));assert.equal(history.deltaVolume,0);assert.equal(history.deltaPoints,0);
-  assert.throws(()=>historicalComparison(r,c,[-1,0,0,0]));assert.throws(()=>historicalComparison(r,c,[100000,0,0,0]));
-});
-
-test('Carro Huincha begins with one cut below 34 cm; Huinchas completes all longitudinal cuts',()=>{
-  const sorted=values=>[...new Set(values.map(value=>Number(value).toFixed(4)))].sort((a,b)=>Number(a)-Number(b));
-  const fromSequence=(cuts,r,c)=>sorted(cuts.map(cut=>cut.position-r.diameterMm/2-c.kerfBand/2));
-  const fromSVG=(svg,machine)=>sorted([...svg.matchAll(/<rect x="([^"]+)" y="[^"]+" width="[^"]+" height="[^"]+" fill="[^"]+" data-machine="([^"]+)"/g)]
-    .filter(match=>match[2]===machine).map(match=>Number(match[1])));
-  const printNumber=value=>Number(value).toLocaleString('es-CL',{maximumFractionDigits:1});
-  const cases=[
-    {name:'anchos habituales',config:input,diameters:[24,28,32,34,36,42]},
-    {name:'tres basas angostas',config:{...input,targets:[{thickness:22,width:75},{thickness:22,width:70}],recoveries:[{thickness:22,width:50},{thickness:22,width:40}]},diameters:[32,34]}
-  ];
-  for(const {name,config,diameters} of cases){
-    const engine=createOptimizer(config),c=engine.config;
-    for(const diameter of diameters){
-      const result=engine.solve(diameter),r=bestYieldAlternative(result)?.pattern??result;
-      const before=JSON.stringify(r),sequence=cutSequence(r,c);
-      const basas=sorted(r.bases.flatMap(b=>[b.x-c.kerfBand,b.x+b.width]));
-      const slabs=[...new Map(r.pieces.filter(p=>p.origin==='lateral').map(p=>[`${p.x.toFixed(4)}:${p.w.toFixed(4)}`,p])).values()];
-      const lateral=sorted(slabs.flatMap(p=>[p.x-c.kerfBand,p.x+p.w]));
-      const expected=sorted([...basas,...lateral]);
-      const carriage=fromSequence(sequence.carriage.cuts,r,c),bands=fromSequence(sequence.bands.cuts,r,c);
-      const context=`${name}, Ø${diameter}`;
-      assertGeometry(r,c);
-      if(diameter<34)assert.equal(carriage.length,1,`${context}: Carro hace un corte inicial`);
-      else {
-        assert.ok(carriage.length>=1&&carriage.length<=3,`${context}: Carro hace de uno a tres cortes`);
-        assert.equal(carriage.length,r.bases.length,`${context}: desde 34 cm hay un corte del Carro por basa optimizada`);
-      }
-      assert.ok(carriage.some(start=>basas.includes(start)),`${context}: al menos un corte de Carro limita una basa`);
-      assert.deepEqual(sorted([...carriage,...bands]),expected,`${context}: ambas máquinas completan los cortes longitudinales`);
-      assert.equal(carriage.length+bands.length,expected.length,`${context}: ningún corte se duplica entre máquinas`);
-      if(name==='tres basas angostas'){
-        assert.equal(r.bases.length,3,`${context}: el caso debe contener tres basas`);
-        assert.equal(basas.length,4,`${context}: las tres basas producen cuatro fronteras`);
-      }
-
-      const carriageSVG=stageSVG(r,c,1,`carriage-${diameter}-${name}`),bandsSVG=stageSVG(r,c,2,`bands-${diameter}-${name}`);
-      assert.deepEqual(fromSVG(carriageSVG,'carriage'),carriage,`${context}: dibujo de Carro y cotas coinciden`);
-      assert.deepEqual(fromSVG(carriageSVG,'bands'),[],`${context}: Carro no anticipa cortes de Huinchas`);
-      assert.deepEqual(fromSVG(bandsSVG,'carriage'),carriage,`${context}: Huinchas conserva cortes de Carro`);
-      assert.deepEqual(fromSVG(bandsSVG,'bands'),bands,`${context}: dibujo de Huinchas y cotas coinciden`);
-      if(diameter<34){
-        assert.match(carriageSVG,/<rect\b[^>]*data-region="semi-basa"/,`${context}: Carro muestra la semi-basa`);
-        assert.match(carriageSVG,/<rect\b[^>]*data-region="lampazo"/,`${context}: Carro muestra el lampazo`);
-        assert.doesNotMatch(carriageSVG,/data-region="basa-final"/,`${context}: Carro no muestra basas finalizadas`);
-        assert.match(bandsSVG,/<rect\b[^>]*data-region="basa-final"/,`${context}: Huinchas muestra las basas finalizadas`);
-        if(slabs.length)assert.match(bandsSVG,/<rect\b[^>]*data-region="lateral"/,`${context}: Huinchas muestra laterales`);
-      }
-
-      const machineSections=[...printSheet(r,c).matchAll(/<section class="print-machine">([\s\S]*?)<\/section>/g)].map(match=>match[1]);
-      assert.equal(machineSections.length,4);
-      for(const [index,prefix,cuts] of [[0,'C',sequence.carriage.cuts],[1,'H',sequence.bands.cuts]]){
-        const rows=[...machineSections[index].matchAll(new RegExp(`<tr><td><strong>${prefix}(\\d+)<\\/strong><\\/td><td>([^<]+)<\\/td>`,'g'))];
-        assert.equal(rows.length,cuts.length,`${context}: tabla ${prefix} coincide con el dibujo`);
-        cuts.forEach((cut,i)=>{assert.equal(Number(rows[i][1]),cut.number);assert.equal(rows[i][2],printNumber(cut.position));});
-      }
-      assert.equal(JSON.stringify(r),before,`${context}: los reportes no alteran la solución optimizada`);
+test('informes uniformes. Etapas, cortes actuales y anteriores, cotas, destinos y selección de alternativa',()=>{
+  const engine=createOptimizer();
+  for(const d of DIAMETERS){
+    const r=engine.solve(d),sequence=cutSequence(r),c=engine.config;
+    assert.equal(sequence.carriage.cuts.length,r.cutting.big?3:1);
+    assert.ok(sequence.carriage.cuts.every(cut=>cut.kerf===3.4));
+    assert.equal(sequence.multiple.groups.length,r.cutting.bodies.length);
+    assert.ok(sequence.multiple.groups.every(group=>group.cuts.every(cut=>cut.kerf===4.2)));
+    for(let stage=0;stage<=4;stage++){
+      const svg=stageSVG(r,c,stage,`test-${d}-${stage}`);
+      assert.match(svg,/<svg/);
+      assert.match(svg,/data-cut-state="(?:current|previous)"/);
+      if(stage>0)assert.match(svg,/data-cut-state="current"/);
+      assert.ok(!/NaN|undefined/.test(svg),`${d} stage ${stage}`);
     }
-  }
-  const oneBaseEngine=createOptimizer({...input,maxBases:1}),oneBaseResult=oneBaseEngine.solve(34);
-  const oneBase=bestYieldAlternative(oneBaseResult)?.pattern??oneBaseResult;
-  assert.equal(oneBase.bases.length,1);
-  assert.equal(cutSequence(oneBase,oneBaseEngine.config).carriage.cuts.length,1,'Ø34 con una basa usa un corte de Carro');
-});
-
-test('printable sheet puts production and final diagram before the cutting route, with operator-friendly cut tables',()=>{
-  const engine=createOptimizer(input),r=engine.solve(28),sheet=printSheet(r,engine.config);
-  const headings=[...sheet.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi)]
-    .map(match=>({position:match.index,text:match[2].replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim()}));
-  const heading=pattern=>headings.find(item=>pattern.test(item.text));
-  const title=heading(/ficha|planificaci[oó]n/i);
-  const production=heading(/producci[oó]n por trozo/i);
-  const finalView=heading(/vista final/i);
-  const route=heading(/ruta|secuencia operativa/i);
-  assert.ok(title,'La ficha debe comenzar con un título');
-  assert.ok(production,'Debe resumir la producción por trozo');
-  assert.ok(finalView,'Debe mostrar la vista final');
-  assert.ok(route,'Debe identificar la ruta de máquinas');
-  assert.ok(title.position<production.position&&title.position<finalView.position&&production.position<route.position&&finalView.position<route.position,
-    'La cabecera, producción y vista final deben preceder la ruta de máquinas');
-
-  assert.equal((sheet.match(/<svg\b/g)||[]).length,5,'Una vista final y cuatro vistas por máquina');
-  const tables=[...sheet.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)]
-    .map(match=>({position:match.index,html:match[0],header:match[0].match(/<thead\b[^>]*>([\s\S]*?)<\/thead>/i)?.[1]??''}));
-  const cutTables=tables.filter(table=>/\b(?:Corte|Centro de sierra|Pasada|Kerf)\b/i.test(table.header));
-  assert.ok(cutTables.length>=4,'Debe haber tablas de corte para las cuatro máquinas');
-  assert.ok(cutTables[0].position>route.position,'Las tablas de corte deben aparecer después de la ruta');
-  for(const table of cutTables){
-    assert.match(table.header, /<th\b[^>]*>\s*Corte\s*<\/th>/i);
-    assert.match(table.header, /Centro de sierra/i);
-    assert.doesNotMatch(table.html, /\b(?:Pasada|Kerf)\b/i);
+    const sheet=printSheet(r,c);
+    for(const label of ['Carro Huincha','Huinchas','Múltiple','Canteadora','Cotas de corte','Centro de sierra','Destino','V_JAS'])assert.ok(sheet.includes(label),`${d} ${label}`);
+    assert.equal((sheet.match(/<svg /g)||[]).length,5);
+    assert.ok(!/NaN|undefined/.test(sheet));
+    assert.ok(printSheet(r.alternatives[1],c,{schemeLabel:'Alternativa 2'}).includes('Alternativa 2'));
   }
 });
-
-test('edger cut IDs stay unique across axes and the second base identifies Múltiple on print',()=>{
-  const engine=createOptimizer(input),r=engine.solve(34),c=engine.config;
-  const sequence=cutSequence(r,c),ids=sequence.edger.cuts.map(cut=>cut.number);
-  assert.ok(ids.length>0);
-  assert.deepEqual(ids,Array.from({length:ids.length},(_,index)=>index+1));
-  assert.ok(sequence.multiple.groups.some(group=>group.base==='B2'));
-  assert.match(printSheet(r,c),/Múltiple · B2/);
+test('CSV. Catálogo mixto con principal, aprovechamientos, destinos, volumen y cotas',()=>{
+  const engine=createOptimizer(),results=DIAMETERS.map(d=>engine.solve(d));
+  const csv=resultsCSV(results,engine.config);
+  assert.equal(csv.split('\r\n').length,22);
+  for(const label of ['Principal','Aprov. 1','Aprov. 2','Destino','dest','V_prod','V_JAS','Cotas carro','Armado y cotas múltiple'])assert.ok(csv.toLowerCase().includes(label.toLowerCase()));
+  assert.ok(!/Modelo menor|trozo mayor|undefined|NaN/.test(csv));
+});
+test('comparación histórica. Catálogo físico para todos los diámetros y validación',()=>{
+  const engine=createOptimizer();
+  for(const d of DIAMETERS){
+    const r=engine.solve(d),ps=activeProducts(engine.config,r),quantities=ps.map(p=>r.counts[p.id].quantity);
+    const comparison=historicalComparison(r,engine.config,quantities);
+    assert.ok(Math.abs(comparison.deltaVolume)<1e-9);
+    assert.ok(Math.abs(comparison.deltaPoints)<1e-7);
+    assert.throws(()=>historicalComparison(r,engine.config,quantities.map(()=>0)),/al menos/);
+    assert.throws(()=>historicalComparison(r,engine.config,quantities.map(()=>100000)),/área/);
+    assert.throws(()=>historicalComparison(r,engine.config,[-1]));
+  }
+});
+test('worker. Entrada normal y resultados de los 21 diámetros con configuración limpia',()=>{
+  const source=readFileSync(new URL('../dist/worker.js',import.meta.url),'utf8').replace(/^import[^\n]+\n/gm,'');
+  const messages=[],self={postMessage:message=>messages.push(message)};
+  vm.runInNewContext(source,{self,createOptimizer,DIAMETERS});
+  self.onmessage({data:{runId:7,config:{length:4000,margin:12}}});
+  assert.equal(messages[0].type,'ready');
+  assert.deepEqual(Object.keys(messages[0].config),['cutting','length']);
+  assert.equal(messages.filter(message=>message.type==='result').length,21);
+  assert.equal(messages.at(-1).type,'done');
+  assert.ok(messages.every(message=>message.runId===7));
+  messages.length=0;
+  self.onmessage({data:{runId:8,config:{length:0}}});
+  assert.equal(messages[0].type,'error');
+});
+test('Resumen Modelo generado. Método, fórmulas, historial y 21 resultados',()=>{
+  const summary=readFileSync(new URL('../Resumen Modelo.md',import.meta.url),'utf8');
+  assert.ok(summary.includes('Método general V2'));
+  assert.ok(summary.includes('glover-cutting-config-v3'));
+  assert.ok(summary.includes('comparación histórica'));
+  assert.equal((summary.match(/^\| \d+ \|/gm)||[]).length,21);
 });
 
-test('CSV and printable sheet use only the highest-yield scheme, including a no-pattern CSV row',()=>{
-  const engine=createOptimizer(input),base=engine.solve(28),c=engine.config;
-  const lower={...base,volume:base.volume/2,yield:base.yield/2,alternatives:[]};
-  const higher={...base,alternatives:[]};
-  const mixed={...lower,alternatives:[lower,higher]};
-  assert.equal(resultsCSV([mixed],c),resultsCSV([higher],c));
-  assert.equal(printSheet(mixed,c),printSheet(higher,c));
-  const noPattern={...base,status:'no_pattern',alternatives:[],counts:base.counts.map(count=>({...count,quantity:0})),bases:[],pieces:[],volume:0,targetVolume:0,recoveryVolume:0,yield:0,geometricYield:0};
-  const rows=resultsCSV([mixed,noPattern],c).split('\r\n');
-  assert.equal(rows.length,3);
-  assert.ok(rows[2].includes('No encontrado en la búsqueda'));
-});
-
-test('each machine has a distinct cut color and kerf strips avoid finished pieces',()=>{
-  const engine=createOptimizer(input),r=engine.solve(32);
-  assert.equal(new Set(CUT_MACHINES.map(machine=>machine.color)).size,CUT_MACHINES.length);
-  for(let stage=1;stage<=4;stage++){
-    const svg=stageSVG(r,engine.config,stage);
-    const cuts=[...svg.matchAll(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)" fill="([^"]+)" data-machine="([^"]+)"/g)].map(m=>({x:+m[1],y:+m[2],w:+m[3],h:+m[4],color:m[5],machine:m[6]}));
-    assert.deepEqual(new Set(cuts.map(cut=>cut.machine)),new Set(CUT_MACHINES.slice(0,stage).map(machine=>machine.key)));
-    for(const cut of cuts){
-      assert.equal(cut.color,CUT_MACHINES.find(machine=>machine.key===cut.machine).color);
-      for(const p of r.pieces){const dx=Math.min(cut.x+cut.w,p.x+p.w)-Math.max(cut.x,p.x),dy=Math.min(cut.y+cut.h,p.y+p.h)-Math.max(cut.y,p.y);assert.ok(dx<=1e-4||dy<=1e-4,'Kerf overlaps finished wood');}
+test('aplicación. Inicio, validación y recálculo por la entrada normal del formulario',async()=>{
+  const html=readFileSync(new URL('../dist/index.html',import.meta.url),'utf8');
+  const elements=new Map();
+  function node(){
+    return {value:'',children:[],hidden:false,disabled:false,textContent:'',innerHTML:'',dataset:{},listeners:{},style:{setProperty(){}},classList:{toggle(){}},
+      append(...children){this.children.push(...children);},replaceChildren(...children){this.children=[...children];},
+      addEventListener(type,listener){this.listeners[type]=listener;},setAttribute(){},hasAttribute(){return false;},
+      querySelector(){return node();},querySelectorAll(){return [];},focus(){}};
+  }
+  for(const match of html.matchAll(/<(?:input|select|[^ >]+)[^>]*id="([^" ]+)"[^>]*>/g)){
+    const element=node();
+    element.value=match[0].match(/value="([^"]*)"/)?.[1]??'';
+    elements.set(match[1],element);
+  }
+  const document={getElementById(id){assert.ok(elements.has(id),id);return elements.get(id);},querySelector:()=>node(),querySelectorAll:()=>[],createElement:node,createTextNode:value=>value};
+  const storage=new Map();
+  class Worker{
+    postMessage({runId,config}){
+      queueMicrotask(()=>{
+        const engine=createOptimizer(config);
+        this.onmessage({data:{type:'ready',runId,config:engine.config}});
+        for(const [index,d] of DIAMETERS.entries())this.onmessage({data:{type:'result',runId,result:engine.solve(d),completed:index+1}});
+        this.onmessage({data:{type:'done',runId}});
+      });
     }
+    terminate(){}
   }
+  let source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8').replace(/^import[^\n]+\n/gm,'');
+  source=source.replaceAll('import.meta.url',JSON.stringify('http://localhost/app.js'));
+  const context=vm.createContext({...optimizer,...reports,...order,...planner,...armado,formatPercent,document,Worker,URL,AbortController,queueMicrotask,
+    window:{addEventListener(){}},localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)}});
+  vm.runInContext(source,context);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(vm.runInContext('state.results.size',context),21);
+  assert.equal(vm.runInContext('state.selected',context),42);
+  assert.equal(elements.get('pattern-state').textContent,'Calculado');
+  assert.equal(elements.get('yield-value').textContent,formatPercent(vm.runInContext('selectedResult().yield',context)));
+  assert.match(elements.get('geometric-value').textContent,/^\d+,\d %$/);
+  assert.ok(elements.get('large-result').innerHTML.includes('Destino'));
+  elements.get('large-m').value='3';
+  await assert.rejects(vm.runInContext('runOptimization()',context),/par/);
+  assert.ok(elements.get('form-error').textContent.includes('par'));
+  elements.get('large-m').value='2';
+  elements.get('length').value='8000';
+  await vm.runInContext('runOptimization()',context);
+  assert.equal(vm.runInContext('state.snapshot.length',context),8000);
+  // A30 a 8 m: el doble del caso §11 A30 (0,20168 m³ a 4 m) con las reglas de planta del 2026-11-09.
+  assert.equal(vm.runInContext('state.results.get(30).volume',context),.40336);
+  assert.ok(storage.has(STORAGE_KEY));
+});
+
+test('descartes. El adaptador conserva secciones físicas y cantidades reales',()=>{
+  const engine=createOptimizer({cutting:{x1:55,y1:75,x2:22,y2:75,x3:22,y3:60,a:22,m:4}});
+  const r=engine.solve(26).cutting;
+  // Reglas de planta del 2026-11-09: solo se descartan piezas de aprovechamiento con canto muerto.
+  assert.equal(r.nLost,2);
+  assert.equal(r.nLost22,0);
+  const discarded=r.prod.filter(row=>row.dest==='Pérdida');
+  assert.equal(discarded.reduce((sum,row)=>sum+row.n,0),2);
+  assert.ok(discarded.every(row=>!row.sec.startsWith('22 ×')));
+  assert.ok(!r.warn.some(([,message])=>message.includes('de 22 mm de la múltiple pierde')));
+});
+
+test('porcentajes de pantalla: un decimal, coma decimal y etiquetas compactas',()=>{
+  assert.equal(formatPercent(56.53),'56,5 %');
+  assert.equal(formatPercent(57),'57,0 %');
+  assert.equal(formatPercent(0),'0,0 %');
+  assert.equal(formatPercent(38.67),'38,7 %');
+  assert.equal(formatPercent(99.96),'100,0 %');
+  assert.equal(formatPercent(56.53,true),'57 %');
 });

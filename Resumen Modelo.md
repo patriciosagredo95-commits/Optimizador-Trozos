@@ -1,112 +1,57 @@
-<!-- ARCHIVO GENERADO: ejecutar `npm run docs:model`. No editar los valores extraídos a mano. -->
+# Resumen del modelo de corte
 
-# Resumen sencillo del modelo de optimización de corte
+## Método general V2
 
-> Documento para conversación con gerencia. Los parámetros vigentes se extraen del código y se actualizan con `npm run docs:model` y, automáticamente, antes de `npm test`.
+Todos los diámetros del catálogo usan el mismo armado y formato de producción. Se prioriza la cantidad de principales sanas y luego el rendimiento JAS. El armado permanece fijo durante la corrida.
 
-## En una frase
+## Entradas
 
-**Corte transforma las medidas de los productos que se quieren obtener y las condiciones de aserrío en una recomendación de corte para cada diámetro de trozo, buscando aprovechar la mayor cantidad posible de madera útil.**
+Principal X1 × Y1 de 50 × 100 mm. Primer aprovechamiento X2 × Y2 de 38 × 75 mm. Segundo aprovechamiento X3 × Y3 de 25 × 50 mm. Y2 o Y3 igual a cero desactiva ese ancho. Las semibasas pasan por la múltiple y sus piezas tienen espesor X1. X2/X3 determinan la presentación m o N cuando los espesores son iguales.
 
-## Explicación de 30 segundos
+Dos tablas de 22 mm en cada extremo. Médula encerrada por defecto, c = 2, a = 26 mm y m = 2. Total de 8 posiciones y ancho 269.4 mm. Con espesores iguales se ingresa N, incluyendo los cuatro extremos y las c tablas centrales. La sugerencia explora m de 0 a 20, con referencia configurable entre 16 y 56 cm, por defecto 42 cm.
 
-El usuario indica las escuadrías prioritarias, los productos de recuperación y las pérdidas de corte de cada máquina. El modelo prueba distintas posiciones y combinaciones dentro de un trozo circular. Descarta cualquier alternativa con piezas fuera del trozo o superpuestas y conserva hasta 2 propuestas diferentes por diámetro. La aplicación preselecciona la propuesta de mayor rendimiento y permite revisar ambas, con sus cantidades, volumen, porcentaje de aprovechamiento y ruta de corte por máquina.
+Canteadora e1 = 60 mm y e2 = 75 mm. Centro 75 mm por defecto, configurable a 60, 75, Y1 si X1 = 22 u otro ancho. Kerf fijo de carro y huinchas 3.4 mm y de múltiple y canteadora 4.2 mm. Largo por defecto 4000 mm, configurable entre 500 y 12000 mm.
 
-Es una **herramienta de apoyo a la planificación**. No reemplaza la validación de planta ni garantiza haber encontrado el óptimo matemático global.
+## Geometría y selección
 
-## Qué decisión apoya
+El umbral interno de 36 cm selecciona la geometría del carro. Por debajo se barre F desde F1 hasta F3 exclusivo cada 2 mm para obtener una o dos tablas del lampazo. Huinchas empieza por Y1 y repite el primer ancho aceptable entre Y1, Y2 y Y3, en orientación yu. Se reaserran los lampazos de carro y huinchas.
 
-- Elegir un patrón de corte repetible para cada diámetro disponible.
-- Comparar cuánto producto objetivo y recuperación entrega cada patrón.
-- Estimar la producción de un lote al ingresar la cantidad de trozos por diámetro.
-- Comparar el resultado propuesto con un esquema histórico previamente validado.
-- Entregar al equipo operativo una ficha con la secuencia de cortes.
+Desde el umbral se prueban recortes simétricos j del armado, tres caras de carro, grupo Y1 centrado y luego aprovechamientos Y2/Y3. Se ofrecen los dos mejores candidatos con F o j distinto cuando existen.
 
-## Cómo toma la decisión
+Las tablas de 22 mm con pérdida hasta 10 % van a clasificación, entre 10 % y 25 % a canteadora y por encima a descarte. Los aprovechamientos aceptan pérdida hasta 10 %. La canteadora prueba extremo–centro–extremo, ambos extremos y luego la pieza más ancha que quepa. Las tablas centrales se incluyen en producción. Se preservan las reglas del script del prototipo.
 
-1. **Define el espacio útil.** Representa el trozo como un círculo recto de diámetro constante y resta el margen radial configurado.
-2. **Genera alternativas.** Combina hasta 3 basas, piezas centrales, cabezales y laterales. Desplaza los conjuntos cada 1 mm para explorar distintas posiciones.
-3. **Considera pérdidas reales de corte.** Reserva el kerf correspondiente al carro/huinchas, la múltiple y la canteadora.
-4. **Ordena según la prioridad elegida.** La prioridad guía qué candidatos sobreviven durante la búsqueda.
-5. **Conserva diversidad.** Mantiene hasta 2 candidatos con distinta producción o composición de basas.
-6. **Preselecciona el mayor rendimiento.** La vista comienza con el candidato que tiene mayor rendimiento de planilla; ante empate, favorece el mayor volumen objetivo. El usuario puede cambiar a la segunda alternativa para revisarla e imprimirla.
-7. **Valida la geometría.** Comprueba dimensiones, ubicación dentro del círculo, ausencia de superposición y consistencia del volumen.
+## Volúmenes, salidas y comparación
 
-### Prioridades disponibles
+V_JAS = D_cm² × largo_mm / 10⁷. V_prod = área de producción_mm² × largo_mm / 10⁹. Rendimiento = 100 × V_prod / V_JAS.
 
-| Opción visible | Qué favorece primero |
-|---|---|
-| Ambos objetivos, luego volumen objetivo | Incluir A y B cuando existe una combinación; después, mayor volumen objetivo y recuperación. |
-| Mayor volumen objetivo | Mayor volumen conjunto de A y B; después, recuperación. |
-| Mayor volumen total | Mayor volumen total, incluyendo recuperación; puede aceptar un patrón sin alguno de los objetivos. |
+Indicadores, lista de piezas con destino, avisos y vistas de Carro, Huinchas, Múltiple y Canteadora usan las clases de colores V2 y kerf rojo. CSV y ficha imprimible contienen producción y cotas por máquina.
 
-**Punto importante:** la prioridad configura la búsqueda, mientras que el esquema preseleccionado es el de mayor rendimiento entre los candidatos conservados. Por eso “prioridad” y “alternativa inicial” no significan exactamente lo mismo.
+El pedido usa todos los trozos con patrón disponible, suma principal, aprovechamientos 1 y 2 y otras piezas y pondera el rendimiento por volumen JAS. La comparación histórica se conserva con cantidades del catálogo físico del resultado seleccionado, con las mismas condiciones y validación de planta declarada por el usuario.
 
-## Información que utiliza
+La persistencia usa glover-cutting-config-v3. La migración de v2 conserva únicamente largo y entradas V2. Los parámetros del motor anterior se ignoran.
 
-| Entrada | Para qué se usa | Configuración inicial |
-|---|---|---|
-| Objetivo A | Producto principal que siempre se considera | 22 × 125 mm |
-| Objetivo B | Segundo producto prioritario; puede desactivarse | 22 × 110 mm, activo |
-| Recuperaciones | Productos secundarios para aprovechar espacios | 22 × 75 mm y 22 × 60 mm |
-| Largo del trozo | Convierte el área de la sección en volumen | 4000 mm |
-| Kerf carro / huinchas | Pérdida por cortes longitudinales | 3.4 mm |
-| Kerf múltiple | Pérdida entre piezas dentro de las basas | 4.2 mm |
-| Kerf canteadora | Pérdida al dimensionar piezas laterales y cabezales | 3.8 mm |
-| Margen radial | Zona exterior que no se considera utilizable | 0 mm |
-| Basas | Cantidad máxima y límites opcionales de ancho | Hasta 3; sin límites de ancho al inicio |
+## Resultados con entradas por defecto
 
-El catálogo vigente contiene **13 diámetros**: 16 cm, 18 cm, 20 cm, 22 cm, 24 cm, 26 cm, 28 cm, 30 cm, 32 cm, 34 cm, 36 cm, 38 cm, 42 cm. Se pueden definir hasta **12 escuadrías de recuperación** y hasta **10.000 trozos por diámetro** en la simulación del lote.
-
-## Qué entrega
-
-Para cada diámetro, el sistema informa:
-
-- cantidades de Objetivo A, Objetivo B y recuperaciones;
-- volumen útil por trozo;
-- rendimiento de planilla y aprovechamiento geométrico;
-- cantidad y ancho de las basas;
-- dibujo del patrón y vistas por etapa;
-- ruta operativa: Carro Huincha → Huinchas → Múltiple → Canteadora;
-- exportación CSV del mayor rendimiento y ficha imprimible/PDF de la alternativa seleccionada.
-
-La simulación del lote multiplica el patrón elegido por los trozos disponibles de cada diámetro. Suma piezas y volúmenes, y calcula el rendimiento total de forma ponderada por volumen de referencia. No realiza una programación de máquinas ni mezcla patrones para cumplir una orden comercial específica.
-
-## Cómo leer los indicadores
-
-**Volumen aserrado**  
-= suma del área de todas las piezas × largo del trozo.
-
-**Rendimiento de planilla**  
-= volumen aserrado ÷ (diámetro² × largo).  
-Este es el indicador principal mostrado y conserva la convención de la planilla histórica. Su denominador es un prisma cuadrado, no el volumen físico del cilindro.
-
-**Aprovechamiento geométrico**  
-= volumen aserrado ÷ (π × diámetro² ÷ 4 × largo).  
-Este indicador compara la madera obtenida con el volumen geométrico del trozo circular ideal.
-
-Para comunicar resultados, conviene indicar siempre cuál de los dos porcentajes se está usando.
-
-## Alcance y límites que gerencia debe conocer
-
-- Modela trozos circulares, rectos, sin corteza, de diámetro constante y sin defectos.
-- No considera conicidad, curvatura, calidad de madera, velocidad, tiempos de preparación ni capacidad diaria.
-- No conoce todavía el número real de sierras, separaciones admisibles o todas las restricciones físicas de cada máquina.
-- Explora una familia acotada de soluciones: hasta 3 basas, hasta dos capas de cabezal y dos tablas laterales por lado.
-- La búsqueda por posición usa pasos de 1 mm y descartes internos para reducir el cálculo. **No garantiza el óptimo global ni todas las combinaciones posibles.**
-- “No encontrado” significa que el motor no halló un patrón dentro de su espacio de búsqueda; no demuestra que sea físicamente imposible.
-- La comparación histórica usa cantidades ingresadas manualmente y no valida el dibujo histórico.
-- Todo patrón debe revisarse con Operaciones antes de usarlo en producción.
-
-## Mensaje sugerido para gerencia
-
-> “El prototipo estandariza la búsqueda de patrones de corte para 13 diámetros. Usa nuestras escuadrías y pérdidas de sierra, verifica que las piezas quepan y compara alternativas con una métrica común. Nos ayuda a estimar rendimiento y producción antes de cortar, pero la recomendación sigue requiriendo validación de planta porque el modelo aún no incorpora todas las restricciones de las máquinas ni certifica el óptimo global.”
-
-## Cómo se mantiene actualizado
-
-- Los valores de catálogo, parámetros iniciales, prioridades y máquinas se extraen directamente de [`dist/optimizer.js`](dist/optimizer.js), [`dist/index.html`](dist/index.html), [`dist/app.js`](dist/app.js), [`dist/reports.js`](dist/reports.js) y [`dist/order.js`](dist/order.js).
-- Ejecuta `npm run docs:model` para regenerar este archivo en cualquier momento.
-- `npm test` lo regenera antes de ejecutar las pruebas, por lo que los cambios habituales del proyecto actualizan el documento durante la verificación.
-- Si cambia la lógica conceptual, los supuestos o el significado de una métrica, también debe actualizarse la explicación en [`scripts/generate-model-summary.mjs`](scripts/generate-model-summary.mjs) en el mismo cambio.
-
-Fuentes del modelo revisadas por última vez: **24-09-2026**.
+| Ø cm | Esquema | Principal | Aprov. 1 | Aprov. 2 | 22 a clas. (descartadas totales) | Cant. | V_prod / V_JAS m³ | Rend. |
+|---|---|---|---|---|---|---|---|---|
+| 16 | Cara plana del carro · 1 basa principal | 0 | 0 | 0 | 0 (0) | 1 | 0.0274 / 0.1024 | 26.76 % |
+| 18 | Cara plana del carro · 1 basa principal | 0 | 0 | 0 | 0 (0) | 4 | 0.0393 / 0.1296 | 30.31 % |
+| 20 | Cara plana del carro · 1 basa principal | 2 | 0 | 0 | 0 (0) | 5 | 0.0846 / 0.1600 | 52.85 % |
+| 22 | Cara plana del carro · 1 basa principal | 2 | 0 | 0 | 0 (0) | 6 | 0.0978 / 0.1936 | 50.50 % |
+| 24 | Cara plana del carro · 1 basa principal · 1 semibasa de segundo aprovechamiento | 2 | 0 | 2 | 0 (0) | 10 | 0.1229 / 0.2304 | 53.33 % |
+| 26 | Cara plana del carro · 1 basa principal · 1 semibasa de primer aprovechamiento | 2 | 2 | 0 | 0 (0) | 10 | 0.1486 / 0.2704 | 54.97 % |
+| 28 | Cara plana del carro · 2 basas principales | 4 | 0 | 0 | 0 (0) | 10 | 0.1665 / 0.3136 | 53.09 % |
+| 30 | Cara plana del carro · 2 basas principales | 4 | 0 | 0 | 4 (0) | 6 | 0.2017 / 0.3600 | 56.02 % |
+| 32 | Cara plana del carro · 2 basas principales | 4 | 0 | 0 | 6 (0) | 5 | 0.2272 / 0.4096 | 55.47 % |
+| 34 | Cara plana del carro · 2 basas principales | 4 | 0 | 0 | 8 (0) | 4 | 0.2527 / 0.4624 | 54.65 % |
+| 36 | Basa de 269,4 mm · 3 basas principales | 6 | 0 | 0 | 4 (0) | 10 | 0.2889 / 0.5184 | 55.73 % |
+| 38 | Basa de 269,4 mm · 3 basas principales | 6 | 0 | 0 | 8 (0) | 10 | 0.3294 / 0.5776 | 57.02 % |
+| 40 | Basa de 269,4 mm · 3 basas principales | 6 | 0 | 0 | 8 (0) | 10 | 0.3637 / 0.6400 | 56.83 % |
+| 42 | Basa de 269,4 mm · 3 basas principales | 6 | 0 | 0 | 12 (0) | 8 | 0.3989 / 0.7056 | 56.53 % |
+| 44 | Basa de 269,4 mm · 3 basas principales | 6 | 0 | 0 | 12 (0) | 10 | 0.4358 / 0.7744 | 56.28 % |
+| 46 | Basa de 269,4 mm · 4 basas principales | 8 | 0 | 0 | 8 (0) | 14 | 0.4641 / 0.8464 | 54.83 % |
+| 48 | Basa de 269,4 mm · 4 basas principales | 8 | 0 | 0 | 12 (0) | 14 | 0.5125 / 0.9216 | 55.61 % |
+| 50 | Basa de 269,4 mm · 4 basas principales | 8 | 0 | 0 | 16 (0) | 10 | 0.5424 / 1.0000 | 54.24 % |
+| 52 | Basa de 269,4 mm · 4 basas principales | 8 | 0 | 0 | 16 (0) | 12 | 0.5688 / 1.0816 | 52.59 % |
+| 54 | Basa de 269,4 mm · 5 basas principales | 10 | 0 | 0 | 12 (0) | 18 | 0.6234 / 1.1664 | 53.45 % |
+| 56 | Basa de 269,4 mm · 5 basas principales | 10 | 0 | 0 | 16 (0) | 14 | 0.6428 / 1.2544 | 51.24 % |

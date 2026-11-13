@@ -1,52 +1,45 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DIAMETERS, createOptimizer, normalizeConfig } from '../dist/optimizer.js';
+import {CUTTING_DEFAULTS,DIAMETERS,createOptimizer,normalizeConfig,normalizeCuttingConfig,eqT,armMain,suggestM} from '../dist/optimizer.js';
 
-const base = {
-  targets: [{ thickness: 22, width: 125 }, { thickness: 22, width: 110 }],
-  recoveries: [{ thickness: 22, width: 75 }, { thickness: 22, width: 60 }],
-  criterion: 'both', length: 4000, kerfBand: 3.4, kerfGang: 4.2,
-  kerfEdger: 3.8, margin: 0, maxBases: 3
-};
-
-test('catalogue and defaults are normalized', () => {
-  assert.deepEqual(DIAMETERS, [16,18,20,22,24,26,28,30,32,34,36,38,42]);
-  const config = normalizeConfig(base);
-  assert.equal(config.products.length, 4);
-  assert.equal(config.length, 4000);
-  assert.equal(config.searchMode, 'detailed');
+test('configuración V2. Valores por defecto y catálogo',()=>{
+  assert.deepEqual(normalizeConfig(),{cutting:CUTTING_DEFAULTS,length:4000});
+  assert.equal(DIAMETERS.length,21);
+  assert.equal(DIAMETERS[0],16);
+  assert.equal(DIAMETERS.at(-1),56);
+  assert.throws(()=>createOptimizer().solve(35),/catálogo/);
 });
-
-test('all catalogue diameters return geometrically valid results', () => {
-  const engine = createOptimizer(base);
-  for (const diameter of DIAMETERS) {
-    const result = engine.solve(diameter);
-    assert.equal(result.diameterCm, diameter);
-    assert.ok(result.geometricYield <= 100.0001);
-    assert.equal(result.counts.length, 4);
-    for (const piece of result.pieces) {
-      assert.ok(piece.x * piece.x + piece.y * piece.y <= result.radius * result.radius + 1e-4);
-    }
+test('validación de formulario. Dimensiones, médula, cantidad y canteadora',()=>{
+  for(const invalid of [{x1:''},{y1:0},{y2:-1},{y3:Infinity},{m:3},{m:-2},{m:2.5},{med:'yes'},{c:1.5},{a:0},{cm:'y1'},{cm:'bad'},{e1:50},{e2:70},{cw:0},{referenceDiameter:17}]){
+    assert.throws(()=>normalizeCuttingConfig(invalid),JSON.stringify(invalid));
+  }
+  for(const length of ['',null,true,4000.1,499,12001])assert.throws(()=>normalizeConfig({length}),/Largo/);
+  assert.doesNotThrow(()=>normalizeCuttingConfig({med:false,m:3,y2:0,y3:0}));
+  assert.doesNotThrow(()=>normalizeCuttingConfig({x1:22,cm:'y1',referenceDiameter:16}));
+});
+test('armado. 2×22 por extremo, m/N y médula opcional',()=>{
+  const p={...CUTTING_DEFAULTS,x2:50,x3:50,m:6};
+  assert.equal(eqT(p),true);
+  const arm=armMain(p);
+  assert.equal(arm.seq.length,12);
+  assert.ok(Math.abs(arm.X-486.2)<1e-8);
+  assert.deepEqual(arm.seq.slice(0,2).map(p=>p.w),[22,22]);
+  assert.deepEqual(arm.seq.slice(-2).map(p=>p.w),[22,22]);
+  assert.equal(armMain({...p,med:false}).seq.length,10);
+  assert.ok(!armMain({...p,med:false}).seq.some(piece=>piece.t==='a'));
+});
+test('largo aplicado a JAS y producción uniformemente, rendimiento independiente',()=>{
+  const base=createOptimizer(),long=createOptimizer({length:8000});
+  for(const d of DIAMETERS){
+    const a=base.solve(d),b=long.solve(d);
+    assert.equal(b.volume,2*a.volume);
+    assert.equal(b.referenceVolume,2*a.referenceVolume);
+    assert.equal(b.yield,a.yield);
   }
 });
-
-test('custom recovery list and length change the optimization output', () => {
-  const short = createOptimizer({ ...base, length: 2500, recoveries: [{ thickness: 22, width: 60 }] }).solve(28);
-  const long = createOptimizer({ ...base, length: 6000, recoveries: [{ thickness: 22, width: 60 }, { thickness: 22, width: 50 }] }).solve(28);
-  assert.ok(long.volume > short.volume);
-  assert.equal(long.counts.length, 4);
-});
-
-test('objective B can be disabled without becoming a selected product', () => {
-  const engine = createOptimizer({ ...base, targetBEnabled: false });
-  const result = engine.solve(28);
-  assert.equal(engine.config.targetBEnabled, false);
-  assert.equal(result.counts[1].quantity, 0);
-  assert.equal(result.mask & 2, 0);
-  assert.ok(result.counts[0].quantity > 0);
-});
-
-test('duplicate and invalid inputs are rejected', () => {
-  assert.throws(() => normalizeConfig({ ...base, recoveries: [{ thickness: 22, width: 125 }] }), /repetida/);
-  assert.throws(() => normalizeConfig({ ...base, targets: [{ thickness: 0, width: 125 }, base.targets[1]] }), /entre 1 y 1000/);
+test('sugerencia m mantiene el armado y referencia configurada',()=>{
+  const p={...CUTTING_DEFAULTS,d:42},before=JSON.stringify(p),m=suggestM(p);
+  assert.equal(m%2,0);
+  assert.equal(JSON.stringify(p),before);
+  assert.ok(m>=0&&m<=20);
 });

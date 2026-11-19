@@ -43,3 +43,13 @@ test('sugerencia m mantiene el armado y referencia configurada',()=>{
   assert.equal(JSON.stringify(p),before);
   assert.ok(m>=0&&m<=20);
 });
+
+ test('objetivo rendimiento por defecto y selección nunca inferior a principal',()=>{
+  assert.equal(normalizeCuttingConfig().objetivo,'rendimiento');
+  assert.throws(()=>normalizeCuttingConfig({objetivo:'otro'}),/objetivo/);
+  for(const d of DIAMETERS){
+    const principal=createOptimizer({cutting:{objetivo:'principal'}}).solve(d);
+    const rendimiento=createOptimizer().solve(d);
+    assert.ok(rendimiento.yield>=principal.yield-1e-7,`Ø${d}`);
+  }
+ });

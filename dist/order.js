@@ -2,12 +2,17 @@ import {DIAMETERS} from './optimizer.js';
 
 const MAX_LOGS_PER_DIAMETER=10000;
 // Misma prioridad lexicográfica para la vista, la exportación y el pedido.
-export function bestYieldAlternative(result){
+// Objetivo por defecto (2026-11-19): mayor rendimiento total y, a igual rendimiento, más piezas principales.
+// 'principal' conserva el criterio validado anterior (principal sana y después rendimiento JAS).
+export function bestYieldAlternative(result,objetivo='rendimiento'){
   const alternatives=result?.alternatives?.length?result.alternatives:result?.status==='found'?[result]:[];
   return alternatives.reduce((winner,pattern,index)=>{
     if(pattern.status!=='found'||!Number.isFinite(pattern.volume)||!(pattern.referenceVolume>0))return winner;
     const principal=pattern.cutting.nPrin,yieldPercent=100*pattern.volume/pattern.referenceVolume;
-    if(!winner||principal>winner.pattern.cutting.nPrin||(principal===winner.pattern.cutting.nPrin&&yieldPercent>winner.yieldPercent+1e-7)){
+    const mejor=!winner||(objetivo==='principal'
+      ?principal>winner.pattern.cutting.nPrin||(principal===winner.pattern.cutting.nPrin&&yieldPercent>winner.yieldPercent+1e-7)
+      :yieldPercent>winner.yieldPercent+1e-7||(Math.abs(yieldPercent-winner.yieldPercent)<=1e-7&&principal>winner.pattern.cutting.nPrin));
+    if(mejor){
       return {pattern,alternative:index+1,yieldPercent};
     }
     return winner;
@@ -23,7 +28,7 @@ function logCount(value,diameter){
 }
 
 // El stock fija el número de trozos. Cada diámetro se optimiza de forma independiente
-// usando principal sana y después rendimiento JAS.
+// usando el mayor rendimiento total (a igual rendimiento, más principal).
 export function simulateOrder(resultsByDiameter,stockByDiameter){
   const rows=DIAMETERS.map(diameterCm=>{
     const availableLogs=logCount(stockByDiameter instanceof Map?stockByDiameter.get(diameterCm):stockByDiameter?.[diameterCm],diameterCm);

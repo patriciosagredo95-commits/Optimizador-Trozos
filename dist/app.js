@@ -203,6 +203,24 @@ function selectDiameter(d) {
   for(const el of $('diameter-tabs').children)el.setAttribute('aria-pressed',String(Number(el.dataset.diameter)===d));
   renderTable();renderPattern();
 }
+// Cada pieza se asigna a una sola fila de producción.
+function productionRows(result){
+  const groups=new Map();
+  for(const piece of result.pieces){
+    const t=Math.round(Math.min(piece.w,piece.h)),w=Math.round(Math.max(piece.w,piece.h)),sec=`${t}×${w}`;
+    const key=piece.cls==='prin'?'prin':t===22&&[75,60].includes(w)?`board${w}`:['apr','apr2'].includes(piece.cls)?piece.cls:`${piece.cls}:${sec}`;
+    const label=key==='prin'?`Principal (${sec})`:key==='apr'?`Primer aprovechamiento (${sec})`:key==='apr2'?`Segundo aprovechamiento (${sec})`:key.startsWith('board')?`Tablas ${sec}`:piece.cls==='clas'?`Tablas ${sec} (clasificación)`:piece.cls==='med'?`Tablas centrales ${sec}`:sec;
+    if(!groups.has(key))groups.set(key,{key,label,count:0});
+    groups.get(key).count++;
+  }
+  if(!groups.has('prin')){const p=result.products[0];groups.set('prin',{key:'prin',label:`Principal (${Math.round(Math.min(p.thickness,p.width))}×${Math.round(Math.max(p.thickness,p.width))})`,count:0});}
+  const order=['prin','apr','apr2','board75','board60'];
+  return [...groups.values()].sort((a,b)=>(order.includes(a.key)?order.indexOf(a.key):5)-(order.includes(b.key)?order.indexOf(b.key):5));
+}
+function boardCounts(result){
+  const rows=productionRows(result);
+  return [75,60].map(w=>rows.find(row=>row.key===`board${w}`)?.count??0).concat(rows.filter(row=>!['prin','apr','apr2','board75','board60'].includes(row.key)).reduce((sum,row)=>sum+row.count,0));
+}
 function renderTable() {
   renderExecutiveSummary();
   const c=state.snapshot;
@@ -211,8 +229,8 @@ function renderTable() {
   for(const d of DIAMETERS){
     const r=selectedResult(d),tr=document.createElement('tr');
     tr.className=r?'result-row'+(d===state.selected?' selected':''):'pending-row';
-    const cells=r?[`${d} cm`,fmt(r.cutting.nPrin),fmt(r.cutting.nApr),fmt(r.cutting.nApr2),fmt(r.recoveryCount),`${fmt(r.volume,4)} m³`,r.status==='no_pattern'?'Sin patrón':formatPercent(r.yield)]:[`${d} cm`,'—','—','—','—','—','—'];
-    cells.forEach((text,i)=>{const td=document.createElement('td');td.textContent=text;td.className=['diameter-cell','cell-a','cell-b','','','','yield-cell'][i];if(i===6&&r?.status==='found')td.innerHTML=`<span class="table-yield"><span>${escapeHTML(text)}</span><i aria-hidden="true" style="width:${Math.max(0,Math.min(100,r.yield))}%"></i></span>`;tr.append(td);});
+    const cells=r?[`${d} cm`,fmt(r.cutting.nPrin),fmt(r.cutting.nApr),fmt(r.cutting.nApr2),...boardCounts(r).map(n=>fmt(n)),`${fmt(r.volume,4)} m³`,r.status==='no_pattern'?'Sin patrón':formatPercent(r.yield)]:[`${d} cm`,'—','—','—','—','—','—','—','—'];
+    cells.forEach((text,i)=>{const td=document.createElement('td');td.textContent=text;td.className=['diameter-cell','cell-a','cell-b','','','','','','yield-cell'][i];if(i===8&&r?.status==='found')td.innerHTML=`<span class="table-yield"><span>${escapeHTML(text)}</span><i aria-hidden="true" style="width:${Math.max(0,Math.min(100,r.yield))}%"></i></span>`;tr.append(td);});
     const action=document.createElement('td');const button=document.createElement('button');button.type='button';button.className='row-link';button.textContent='↗';button.setAttribute('aria-label',`Ver esquema de diámetro ${d} cm`);button.disabled=!r;button.addEventListener('click',event=>{event.stopPropagation();selectDiameter(d);});action.append(button);tr.append(action);
     if(r)tr.addEventListener('click',()=>selectDiameter(d));$('results-rows').append(tr);
   }
@@ -258,9 +276,9 @@ function renderAlternatives() {
     const button=document.createElement('button');button.type='button';button.className='alternative-card';button.dataset.alternative=String(index);
     button.setAttribute('aria-pressed',String(index===activeIndex));
     button.setAttribute('aria-label',`Alternativa ${index+1}: rendimiento ${fmt(alternative.yield,1)} por ciento, ${alternative.totalCount} piezas`);
-    const title=document.createElement('strong');title.textContent=`Alternativa ${index+1}${index===bestIndex?' · Principal, luego JAS':''}`;
+    const title=document.createElement('strong');title.textContent=`Alternativa ${index+1}${index===bestIndex?' · Mayor rendimiento':''}`;
     const production=document.createElement('span');production.className='alternative-production';
-    for(const [label,count] of [['Principal',alternative.cutting.nPrin],['Primer aprovechamiento',alternative.cutting.nApr],['Segundo aprovechamiento',alternative.cutting.nApr2],['Otras piezas',alternative.recoveryCount]]){
+    for(const {label,count} of productionRows(alternative)){
       const item=document.createElement('span'),name=document.createElement('span'),value=document.createElement('b');
       name.textContent=label;value.textContent=fmt(count);item.append(name,value);production.append(item);
     }
@@ -289,7 +307,7 @@ function renderPattern() {
   if(!r||!c){
     $('large-result').hidden=true;
     $('selected-kpis').hidden=true;$('stage-explanation').textContent='Selecciona una etapa después del cálculo para recorrer el proceso.';
-    $('pattern-subtitle').textContent=state.running?'Buscando piezas principales sanas y rendimiento JAS…':'Optimiza para ver el esquema.';
+    $('pattern-subtitle').textContent=state.running?'Buscando el mayor rendimiento total…':'Optimiza para ver el esquema.';
     $('pattern-state').textContent=state.running?'Calculando':'Pendiente';
     $('cut-diagram').innerHTML='<div class="diagram-placeholder">El esquema aparecerá al completar el cálculo.</div>';
     for(const id of ['yield-value','volume-value','geometric-value'])$(id).textContent='—';
@@ -361,7 +379,7 @@ function runOptimization(provided) {
   if(state.completion)state.completion.reject(new Error('El cálculo fue reemplazado por una nueva configuración.'));
   state.runId++;const runId=state.runId;state.results=new Map();state.alternativeSelections=new Map();state.historyKey=null;state.snapshot=config;state.selected=42;state.running=true;state.dirty=false;state.selectedPiece=null;
   try{localStorage.setItem(STORAGE_KEY,JSON.stringify(savedConfig(config)));}catch{}
-  $('form-error').hidden=true;$('stale-banner').hidden=true;$('progress-track').hidden=false;$('progress-fill').style.width='0%';$('optimize-button').disabled=true;$('optimize-button').textContent='Calculando todos los diámetros…';$('run-caption').textContent='Buscando piezas principales sanas y rendimiento JAS.';$('table-description').textContent='Principal y aprovechamientos del mismo armado en todos los diámetros.';
+  $('form-error').hidden=true;$('stale-banner').hidden=true;$('progress-track').hidden=false;$('progress-fill').style.width='0%';$('optimize-button').disabled=true;$('optimize-button').textContent='Calculando todos los diámetros…';$('run-caption').textContent='Buscando el mayor rendimiento total.';$('table-description').textContent='Principal y aprovechamientos del mismo armado en todos los diámetros.';
   invalidateOrderPlan();syncOrderMeta();
   renderTabs();renderTable();renderPattern();
   const promise=new Promise((resolve,reject)=>{state.completion={resolve,reject};});
@@ -503,7 +521,7 @@ function registerTools() {
 
 $('config-form').addEventListener('submit',event=>{event.preventDefault();void runOptimization().catch(()=>{});});
 $('config-form').addEventListener('input',markDirty);
-for(const tab of document.querySelectorAll('.workspace-tabs [role="tab"]')){
+for(const tab of document.querySelectorAll('.results-workspace .workspace-tabs [role="tab"]')){
   tab.addEventListener('click',()=>showWorkspaceTab(tab.id==='tab-order'?'order':'patterns'));
   tab.addEventListener('keydown',event=>{
     if(event.key!=='ArrowLeft'&&event.key!=='ArrowRight')return;

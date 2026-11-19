@@ -2,7 +2,7 @@
 
 ## Método general V2
 
-Todos los diámetros del catálogo usan el mismo armado y formato de producción. Se prioriza la cantidad de principales sanas y luego el rendimiento JAS. El armado permanece fijo durante la corrida.
+Todos los diámetros del catálogo usan el mismo armado y formato de producción. Todos los trozos buscan el mayor rendimiento total (volumen producido / volumen JAS); a igual rendimiento, más piezas de medida principal. El armado permanece fijo durante la corrida.
 
 ## Entradas
 
@@ -40,7 +40,7 @@ La persistencia usa glover-cutting-config-v3. La migración de v2 conserva únic
 | 22 | Cara plana del carro · 1 basa principal | 2 | 0 | 0 | 0 (0) | 6 | 0.0978 / 0.1936 | 50.50 % |
 | 24 | Cara plana del carro · 1 basa principal · 1 semibasa de segundo aprovechamiento | 2 | 0 | 2 | 0 (0) | 10 | 0.1229 / 0.2304 | 53.33 % |
 | 26 | Cara plana del carro · 1 basa principal · 1 semibasa de primer aprovechamiento | 2 | 2 | 0 | 0 (0) | 10 | 0.1486 / 0.2704 | 54.97 % |
-| 28 | Cara plana del carro · 2 basas principales | 4 | 0 | 0 | 0 (0) | 10 | 0.1665 / 0.3136 | 53.09 % |
+| 28 | Cara plana del carro · 1 basa principal · 1 semibasa de primer aprovechamiento | 2 | 2 | 0 | 2 (0) | 9 | 0.1702 / 0.3136 | 54.27 % |
 | 30 | Cara plana del carro · 2 basas principales | 4 | 0 | 0 | 4 (0) | 6 | 0.2017 / 0.3600 | 56.02 % |
 | 32 | Cara plana del carro · 2 basas principales | 4 | 0 | 0 | 6 (0) | 5 | 0.2272 / 0.4096 | 55.47 % |
 | 34 | Cara plana del carro · 2 basas principales | 4 | 0 | 0 | 8 (0) | 4 | 0.2527 / 0.4624 | 54.65 % |

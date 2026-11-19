@@ -3,11 +3,15 @@ import assert from 'node:assert/strict';
 import {createOptimizer,DIAMETERS} from '../dist/optimizer.js';
 import {bestYieldAlternative,simulateOrder} from '../dist/order.js';
 
-test('vista y pedido. Principal sana antes del rendimiento',()=>{
+test('vista y pedido. Por defecto gana el mayor rendimiento; con objetivo principal, principal sana antes del rendimiento',()=>{
   const base=createOptimizer().solve(30),a=base.alternatives[0];
   const b={...a,cutting:{...a.cutting,nPrin:a.cutting.nPrin-1},volume:1,yield:1000};
-  assert.equal(bestYieldAlternative({...base,alternatives:[b,a]}).alternative,2);
+  // Comportamiento V2 validado con prioridad principal.
+  assert.equal(bestYieldAlternative({...base,alternatives:[b,a]},'principal').alternative,2);
+  // Objetivo por defecto: mayor rendimiento total.
+  assert.equal(bestYieldAlternative({...base,alternatives:[b,a]}).alternative,1);
   const c={...a,volume:a.volume*.9,yield:a.yield*.9};
+  assert.equal(bestYieldAlternative({...base,alternatives:[c,a]},'principal').alternative,2);
   assert.equal(bestYieldAlternative({...base,alternatives:[c,a]}).alternative,2);
   assert.equal(bestYieldAlternative({status:'no_pattern'}),null);
 });

@@ -1,4 +1,7 @@
 .sites-runtime/
+servicio/config.local.json
+servicio/cache/
+__pycache__/
 node_modules/
 *.log
 tmp/

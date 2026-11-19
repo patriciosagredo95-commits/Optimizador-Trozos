@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {compute,computeF,CUTTING_DEFAULTS,createOptimizer,DIAMETERS,armMain,suggestM,assertGeometry} from '../dist/optimizer.js';
-const cases={A:{...CUTTING_DEFAULTS},B:{...CUTTING_DEFAULTS,x1:55,y1:75,x2:22,y2:75,x3:22,y3:60,a:22,m:4},C:{...CUTTING_DEFAULTS,x2:50,x3:50,m:6}};
+// comportamiento V2 validado con prioridad principal
+const cases={A:{...CUTTING_DEFAULTS,objetivo:'principal'},B:{...CUTTING_DEFAULTS,objetivo:'principal',x1:55,y1:75,x2:22,y2:75,x3:22,y3:60,a:22,m:4},C:{...CUTTING_DEFAULTS,objetivo:'principal',x2:50,x3:50,m:6}};
 const scheme=r=>['Y1','Y2','Y3'].map(role=>r.bodies.filter(body=>body.role===role).length);
 // Casos del §11 de "Modelo V2/CLAUDE.md" recalculados con las reglas de planta del 2026-11-09
 // (piezas con canto muerto no dan la medida). Las piezas principales no cambian respecto del V2;

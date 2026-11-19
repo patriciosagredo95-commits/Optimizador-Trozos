@@ -19,13 +19,14 @@ test('corrida. Determinismo, ranking y cantidades cero ignoradas',()=>{
 });
 
 test('corrida Ø42. La múltiple coincide con la mejor sugerencia entre ambas opciones de médula',()=>{
+  // comportamiento V2 validado con prioridad principal
   // suggestM searches m for one pith setting. The run searches both settings.
   const references=[true,false].map(med=>{
-    const m=suggestM({...CUTTING_DEFAULTS,med,d:42});
-    const raw=compute({...CUTTING_DEFAULTS,med,m,d:42});
+    const m=suggestM({...CUTTING_DEFAULTS,objetivo:'principal',med,d:42});
+    const raw=compute({...CUTTING_DEFAULTS,objetivo:'principal',med,m,d:42});
     return {med,m,principal:raw.nPrin,volume:raw.vProd};
   }).sort((a,b)=>b.principal-a.principal||b.volume-a.volume);
-  const winner=planRun({lot:{42:10}}).candidates[0].config.cutting;
+  const winner=planRun({config:{cutting:{objetivo:'principal'}},lot:{42:10}}).candidates[0].config.cutting;
   assert.equal(winner.m,references[0].m);
   assert.equal(winner.med,references[0].med);
 });

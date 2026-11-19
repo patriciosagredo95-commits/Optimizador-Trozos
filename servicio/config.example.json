@@ -1,0 +1,15 @@
+{
+  "base": "http://SERVIDOR/RUTA/",
+  "credencial": "PRD_SYNC_Glover",
+  "puerto": 8766,
+  "dias_historico": 60,
+  "origenes_extra": [],
+  "turno_inicio": "08:00",
+  "turno_fin": "16:30",
+  "colacion": [
+    "12:00",
+    "13:00"
+  ],
+  "intervalo_turno_min": 2,
+  "intervalo_fuera_min": 10
+}

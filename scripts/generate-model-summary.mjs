@@ -11,7 +11,7 @@ const summary=`# Resumen del modelo de corte
 
 ## Método general V2
 
-Todos los diámetros del catálogo usan el mismo armado y formato de producción. Se prioriza la cantidad de principales sanas y luego el rendimiento JAS. El armado permanece fijo durante la corrida.
+Todos los diámetros del catálogo usan el mismo armado y formato de producción. Todos los trozos buscan el mayor rendimiento total (volumen producido / volumen JAS); a igual rendimiento, más piezas de medida principal. El armado permanece fijo durante la corrida.
 
 ## Entradas
 

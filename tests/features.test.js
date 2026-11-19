@@ -190,3 +190,15 @@ test('porcentajes de pantalla: un decimal, coma decimal y etiquetas compactas',(
   assert.equal(formatPercent(99.96),'100,0 %');
   assert.equal(formatPercent(56.53,true),'57 %');
 });
+
+test('alternativas: tablas 75 y 60 sin duplicar principal y conteo completo',()=>{
+  const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
+  const rowsFor=vm.runInNewContext(source.slice(source.indexOf('function productionRows('),source.indexOf('function boardCounts('))+';productionRows');
+  const result=createOptimizer().solve(42),rows=rowsFor(result);
+  assert.equal(rows.find(r=>r.key==='board75').count,12);
+  assert.equal(rows.find(r=>r.key==='board60').count,6);
+  assert.equal(rows.reduce((sum,r)=>sum+r.count,0),result.pieces.length);
+  const principal=createOptimizer({cutting:{x1:22,y1:75}}).solve(42),special=rowsFor(principal);
+  assert.ok(!special.some(r=>r.key==='board75'));
+  assert.equal(special.reduce((sum,r)=>sum+r.count,0),principal.pieces.length);
+});

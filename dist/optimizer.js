@@ -1,6 +1,6 @@
 // Motor puro del método de corte general de Modelo V2, en mm.
 const BRANCH_DIAMETER_CM=36;
-export const CUTTING_DEFAULTS=Object.freeze({x1:50,y1:100,x2:38,y2:75,x3:25,y3:50,med:true,a:26,c:2,m:2,e1:60,e2:75,cm:'75',cw:100,referenceDiameter:42});
+export const CUTTING_DEFAULTS=Object.freeze({x1:50,y1:100,x2:38,y2:75,x3:25,y3:50,med:true,a:26,c:2,m:2,e1:60,e2:75,cm:'75',cw:100,referenceDiameter:42,objetivo:'rendimiento'});
 const KC=3.4,KM=4.2,T=22,MINW=60,LOSS_OK=.10,LOSS_MAX=.25;
 const numberFormats=new Map();
 const fmt=(v,d=null)=>{
@@ -10,6 +10,7 @@ const fmt=(v,d=null)=>{
 export function eqT(p){const ap=[[p.y2,p.x2],[p.y3,p.x3]].filter(a=>a[0]>0);return ap.length>0&&ap.every(a=>a[1]===p.x1);}
 export function normalizeCuttingConfig(input={}) {
   const p={...CUTTING_DEFAULTS,...input};
+  if(!['rendimiento','principal'].includes(p.objetivo)) throw new Error('Selecciona un objetivo de corte válido.');
   const val=(key,label,min,max,integer=false)=>{
     const raw=p[key], n=Number(raw);
     if(raw==='' || raw===null || typeof raw==='boolean' || !Number.isFinite(n) ||
@@ -116,8 +117,10 @@ function cantPlan(W,p){
   return one?[one]:[];
 }
 // Ø < 36 cm: la cara plana del carro se ubica para que el lampazo dé 1 o 2 tablas de 22 mm;
-// dentro de ese rango se elige la posición que entrega más medida principal y mejor rendimiento
-function better(a,b){return !b||a.nPrin>b.nPrin||(a.nPrin===b.nPrin&&a.yield>b.yield+1e-9);}
+// dentro de ese rango se elige la posición según el objetivo configurado
+function better(a,b,objetivo='rendimiento'){return !b||(objetivo==='principal'
+  ? a.nPrin>b.nPrin||(a.nPrin===b.nPrin&&a.yield>b.yield+1e-9)
+  : a.yield>b.yield+1e-9||(Math.abs(a.yield-b.yield)<=1e-9&&a.nPrin>b.nPrin));}
 function candidatesFor(p){
   if(p.d>=BRANCH_DIAMETER_CM){
     return Array.from({length:Math.floor(armMain(p).seq.length/2)},(_,j)=>computeF(p,undefined,j));
@@ -128,7 +131,7 @@ function candidatesFor(p){
   return candidates;
 }
 function compute(p){
-  return candidatesFor(p).reduce((best,candidate)=>better(candidate,best)?candidate:best,null);
+  return candidatesFor(p).reduce((best,candidate)=>better(candidate,best,p.objetivo)?candidate:best,null);
 }
 function computeF(p,Fsel,drop=0){
   const R=p.d*10/2, big=p.d>=BRANCH_DIAMETER_CM, A=armMain(p);
@@ -243,9 +246,9 @@ function computeF(p,Fsel,drop=0){
   if(!r.warn.some(w=>w[0]!=='ok'))r.warn.unshift(['ok','Sin observaciones: el armado calza con el trozo.']);
   return r;
 }
-// sugerencia: cantidad de piezas X1 que maximiza la medida principal sana (y luego el rendimiento)
+// Sugerencia de cantidad X1 según el objetivo de corte.
 function suggestM(p){const step=p.med?2:1; let best=null;
-  for(let m=0;m<=20;m+=step){const r=compute(Object.assign({},p,{m})); const sc=[r.nPrin,r.yield]; if(!best||sc[0]>best.sc[0]||(sc[0]===best.sc[0]&&sc[1]>best.sc[1]+1e-9))best={m,sc};}
+  for(let m=0;m<=20;m+=step){const r=compute(Object.assign({},p,{m})); if(better(r,best?.r,p.objetivo))best={m,r};}
   return best?best.m:0;}
 
 
@@ -255,8 +258,7 @@ export {KC,KM,T,MINW,LOSS_OK,LOSS_MAX,compute,computeF,armMain,fillBody,slabBoar
 export function solveLog(diameterCm,configuration,length=4000) {
   const p={...normalizeCuttingConfig(configuration),d:diameterCm,length};
   const candidates=candidatesFor(p);
-  candidates.sort((a,b)=>a.nPrin!==b.nPrin ? b.nPrin-a.nPrin
-    : Math.abs(a.yield-b.yield)>1e-9 ? b.yield-a.yield : 0);
+  candidates.sort((a,b)=>better(a,b,p.objetivo)?-1:better(b,a,p.objetivo)?1:0);
 
   const adapt=raw=>{
     // Los primeros tres IDs mantienen la principal y ambos aprovechamientos.

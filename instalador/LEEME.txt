@@ -1,0 +1,14 @@
+﻿ANÁLISIS ASERRADERO - Instalación para Windows
+1. Extraiga todo el ZIP en una carpeta antes de comenzar.
+2. Tenga a mano su usuario y su clave personal del PRD.
+3. El PC debe tener Google Chrome instalado.
+4. Se necesita internet para descargar Python y Playwright.
+5. Conecte el PC a la red de la planta para consultar el PRD.
+6. Abra INSTALAR.bat; no necesita permisos de administrador.
+7. Siga los pasos numerados. La clave se guarda en Windows.
+8. Responda S a monitor en piso solo para la pantalla de planta.
+9. La aplicación queda en su carpeta local y arranca al ingresar a Windows.
+10. Abra Aserradero desde el escritorio para ver el análisis.
+11. Si falla, muestre instalacion.log a TI; no comparta su clave.
+12. Para quitar la aplicación, abra DESINSTALAR.bat.
+13. El paquete contiene configuración interna: entréguelo solo por canales privados.
